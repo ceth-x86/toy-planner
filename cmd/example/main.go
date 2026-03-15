@@ -5,6 +5,7 @@ import (
 	"toy-optimizer/pkg/catalog"
 	"toy-optimizer/pkg/logical"
 	"toy-optimizer/pkg/optimizer"
+	"toy-optimizer/pkg/physical"
 )
 
 func main() {
@@ -42,12 +43,37 @@ func main() {
 		Child:     join,
 	}
 
-	fmt.Println("\nInitial Logical Plan:")
+	fmt.Println("\n--- Initial Logical Plan ---")
 	fmt.Println(filter.String())
 
 	// Step 3: Logical Optimization (Predicate Pushdown)
-	optimizedPlan := optimizer.PushdownPredicates(filter)
+	optimizedLogical := optimizer.PushdownPredicates(filter)
 
-	fmt.Println("\nOptimized Logical Plan (after Predicate Pushdown):")
-	fmt.Println(optimizedPlan.String())
+	fmt.Println("\n--- Optimized Logical Plan (after Predicate Pushdown) ---")
+	fmt.Println(optimizedLogical.String())
+
+	// Step 4: Physical Plan (Manual Example for Phase 3)
+	// Let's manually build an optimized physical plan to see the costs:
+	// NestedLoopJoin( IndexScan(Users), SeqScan(Orders) )
+	
+	usersMeta, _ := cat.GetTable("Users")
+	ordersMeta, _ := cat.GetTable("Orders")
+
+	physPlan := &physical.NestedLoopJoin{
+		Condition: "Users.id = Orders.user_id",
+		Left: &physical.IndexScan{
+			TableName:   "Users",
+			IndexColumn: "id",
+			Value:       "42",
+			TotalRows:   usersMeta.RowCount,
+		},
+		Right: &physical.SeqScan{
+			TableName: "Orders",
+			RowCount:  ordersMeta.RowCount,
+		},
+	}
+
+	fmt.Println("\n--- Physical Plan Example (with Costs) ---")
+	fmt.Println(physPlan.String())
+	fmt.Printf("\nTotal Plan Cost: %.2f\n", physPlan.Cost())
 }
