@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+var (
+	// tableColRe extracts table and column names (e.g., "Users.id")
+	tableColRe = regexp.MustCompile(`([a-zA-Z0-9_]+)\.[a-zA-Z0-9_]+`)
+)
+
 // LogicalNode represents a node in the logical query plan.
 type LogicalNode interface {
 	String() string
@@ -50,9 +55,7 @@ func (n *LogicalFilter) ToStringIndent(indent int) string {
 }
 
 func (n *LogicalFilter) ReferencedTables() []string {
-	// Simple regex to extract table names (e.g., "Users.id" -> "Users")
-	re := regexp.MustCompile(`([a-zA-Z0-9_]+)\.[a-zA-Z0-9_]+`)
-	matches := re.FindAllStringSubmatch(n.Condition, -1)
+	matches := tableColRe.FindAllStringSubmatch(n.Condition, -1)
 	tables := make(map[string]struct{})
 	for _, match := range matches {
 		tables[match[1]] = struct{}{}

@@ -4,10 +4,11 @@ import "sync"
 
 // TableMetadata contains table statistics and schema info.
 type TableMetadata struct {
-	Name     string
-	RowCount int
-	Columns  []string
-	Indexes  []string
+	Name       string
+	RowCount   int
+	Columns    []string
+	Indexes    []string
+	ColumnNDVs map[string]int // NDV: Number of Distinct Values per column
 }
 
 // Catalog is a registry of table metadata.
@@ -27,6 +28,9 @@ func NewCatalog() *Catalog {
 func (c *Catalog) RegisterTable(meta TableMetadata) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if meta.ColumnNDVs == nil {
+		meta.ColumnNDVs = make(map[string]int)
+	}
 	c.tables[meta.Name] = meta
 }
 

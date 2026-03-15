@@ -8,19 +8,26 @@ import (
 )
 
 func main() {
-	// Step 1: Initialize Catalog
+	// Step 1: Initialize Catalog with stats
 	cat := catalog.NewCatalog()
 	cat.RegisterTable(catalog.TableMetadata{
 		Name:     "Users",
 		RowCount: 1000,
 		Columns:  []string{"id", "name", "email"},
 		Indexes:  []string{"id"},
+		ColumnNDVs: map[string]int{
+			"id": 1000, // Every user has unique ID
+		},
 	})
 	cat.RegisterTable(catalog.TableMetadata{
 		Name:     "Orders",
 		RowCount: 5000,
 		Columns:  []string{"id", "user_id", "total"},
 		Indexes:  []string{"id", "user_id"},
+		ColumnNDVs: map[string]int{
+			"id":      5000,
+			"user_id": 1000, // About 5 orders per user
+		},
 	})
 
 	fmt.Println("Catalog initialized with tables: Users, Orders")
@@ -51,7 +58,7 @@ func main() {
 	fmt.Println("\n--- Optimized Logical Plan (after Predicate Pushdown) ---")
 	fmt.Println(optimizedLogical.String())
 
-	// Step 4: Physical Planning (Cost-Based Selection)
+	// Step 4: Physical Planning (Cost-Based Selection with Cardinality Estimation)
 	planner := optimizer.NewPhysicalPlanner(cat)
 	finalPhysicalPlan := planner.CreatePhysicalPlan(optimizedLogical)
 

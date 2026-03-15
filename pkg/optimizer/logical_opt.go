@@ -5,6 +5,7 @@ import (
 )
 
 // PushdownPredicates moves LogicalFilters as deep as possible in the tree.
+// It returns a NEW tree, leaving the original one intact.
 func PushdownPredicates(node logical.LogicalNode) logical.LogicalNode {
 	if node == nil {
 		return nil
@@ -12,13 +13,25 @@ func PushdownPredicates(node logical.LogicalNode) logical.LogicalNode {
 
 	switch n := node.(type) {
 	case *logical.LogicalFilter:
-		// Try to push down the filter
-		return pushFilterDown(n)
+		// Create a new filter and try to push it down
+		newFilter := &logical.LogicalFilter{
+			Condition: n.Condition,
+			Child:     PushdownPredicates(n.Child),
+		}
+		return pushFilterDown(newFilter)
+
 	case *logical.LogicalJoin:
-		// Recursively optimize children
-		n.Left = PushdownPredicates(n.Left)
-		n.Right = PushdownPredicates(n.Right)
-		return n
+		// Return a new Join with optimized children
+		return &logical.LogicalJoin{
+			Condition: n.Condition,
+			Left:      PushdownPredicates(n.Left),
+			Right:     PushdownPredicates(n.Right),
+		}
+
+	case *logical.LogicalScan:
+		// Scans are leaves, just return as is (scans are immutable anyway)
+		return &logical.LogicalScan{TableName: n.TableName}
+
 	default:
 		return n
 	}
@@ -29,9 +42,6 @@ func pushFilterDown(f *logical.LogicalFilter) logical.LogicalNode {
 		return f
 	}
 
-	// Optimize child first
-	f.Child = PushdownPredicates(f.Child)
-
 	switch child := f.Child.(type) {
 	case *logical.LogicalJoin:
 		filterTables := f.ReferencedTables()
@@ -40,31 +50,37 @@ func pushFilterDown(f *logical.LogicalFilter) logical.LogicalNode {
 
 		// If all tables in filter are in the left child, push it left
 		if logical.AllTablesIn(filterTables, leftTables) {
-			child.Left = &logical.LogicalFilter{
+			// Create a NEW Join with a NEW Filter on the left side
+			newLeft := &logical.LogicalFilter{
 				Condition: f.Condition,
 				Child:     child.Left,
 			}
-			// Re-optimize the left child after pushdown
-			child.Left = PushdownPredicates(child.Left)
-			return child
+			return &logical.LogicalJoin{
+				Condition: child.Condition,
+				Left:      PushdownPredicates(newLeft),
+				Right:     child.Right,
+			}
 		}
 
 		// If all tables in filter are in the right child, push it right
 		if logical.AllTablesIn(filterTables, rightTables) {
-			child.Right = &logical.LogicalFilter{
+			// Create a NEW Join with a NEW Filter on the right side
+			newRight := &logical.LogicalFilter{
 				Condition: f.Condition,
 				Child:     child.Right,
 			}
-			// Re-optimize the right child after pushdown
-			child.Right = PushdownPredicates(child.Right)
-			return child
+			return &logical.LogicalJoin{
+				Condition: child.Condition,
+				Left:      child.Left,
+				Right:     PushdownPredicates(newRight),
+			}
 		}
 
 		// Otherwise, keep filter above join
 		return f
 
 	default:
-		// Cannot push down further (e.g. above Scan or another Filter)
+		// Cannot push down further
 		return f
 	}
 }
