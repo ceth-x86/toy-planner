@@ -21,7 +21,7 @@ The project is divided into several Go packages:
 - [x] Logical AST: Tree structure representing relational algebra.
 - [x] Predicate Pushdown: Automatically moves WHERE clauses closer to the data source.
 - [x] Cost Model: Estimates execution cost based on table size and index availability.
-- [ ] Physical Planning: (Upcoming) Selection of optimal execution strategies.
+- [x] Physical Planning: Selection of optimal execution strategies.
 
 ## How to Run
 
