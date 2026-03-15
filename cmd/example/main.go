@@ -62,7 +62,7 @@ func main() {
 	planner := optimizer.NewPhysicalPlanner(cat)
 	finalPhysicalPlan := planner.CreatePhysicalPlan(optimizedLogical)
 
-	fmt.Println("\n--- Final Optimized Physical Plan ---")
-	fmt.Println(finalPhysicalPlan.String())
+	fmt.Println("\n--- Final Optimized Physical Plan (EXPLAIN) ---")
+	fmt.Println(finalPhysicalPlan.Explain(0))
 	fmt.Printf("\nTotal Estimated Cost: %.2f\n", finalPhysicalPlan.Cost())
 }

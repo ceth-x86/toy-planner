@@ -22,6 +22,12 @@ The project is divided into several Go packages:
 - [x] Predicate Pushdown: Automatically moves WHERE clauses closer to the data source.
 - [x] Cost Model: Estimates execution cost based on table size and index availability.
 - [x] Physical Planning: Selection of optimal execution strategies.
+- [x] Cardinality Estimation: Selectivity rules and NDV integration.
+- [x] Plan Visualization (EXPLAIN): Human-readable text representation of the physical plan.
+- [ ] Aggregation and Grouping: HashAggregate and StreamAggregate.
+- [ ] Advanced Physical Operators: HashJoin and Sort nodes.
+- [ ] Equivalence Classes: Transitive closure for smart predicates.
+- [ ] LIMIT and Top-N Optimization: TopNSort and Limit operators.
 
 ## How to Run
 
