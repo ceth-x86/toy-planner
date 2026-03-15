@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"toy-optimizer/pkg/catalog"
 	"toy-optimizer/pkg/logical"
+	"toy-optimizer/pkg/optimizer"
 )
 
 func main() {
@@ -43,4 +44,10 @@ func main() {
 
 	fmt.Println("\nInitial Logical Plan:")
 	fmt.Println(filter.String())
+
+	// Step 3: Logical Optimization (Predicate Pushdown)
+	optimizedPlan := optimizer.PushdownPredicates(filter)
+
+	fmt.Println("\nOptimized Logical Plan (after Predicate Pushdown):")
+	fmt.Println(optimizedPlan.String())
 }
