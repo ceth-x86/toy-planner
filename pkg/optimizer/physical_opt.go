@@ -70,6 +70,9 @@ func (p *PhysicalPlanner) CreatePhysicalPlan(node logical.LogicalNode) physical.
 	case *logical.LogicalAggregate:
 		return p.planAggregate(n)
 
+	case *logical.LogicalLimit:
+		return p.planLimit(n)
+
 	default:
 		return nil
 	}
@@ -177,23 +180,14 @@ func (p *PhysicalPlanner) planJoin(j *logical.LogicalJoin) physical.PhysicalNode
 func (p *PhysicalPlanner) planAggregate(agg *logical.LogicalAggregate) physical.PhysicalNode {
 	childPhys := p.CreatePhysicalPlan(agg.Child)
 
-	// Candidate 1: HashAggregate
 	hashAgg := &physical.HashAggregate{
 		GroupKeys: agg.GroupKeys,
 		AggFuncs:  agg.AggFuncs,
 		Child:     childPhys,
 	}
 
-	// Scalar aggregate (no GROUP BY) — StreamAggregate doesn't need Sort
-	if len(agg.GroupKeys) == 0 {
-		return hashAgg
-	}
-
-	// Candidate 2: StreamAggregate (requires Sort unless already sorted)
-	// TODO: IndexScan on group key also produces sorted output.
-	// We check if child is already a Sort node with the right key.
 	isSorted := false
-	if s, ok := childPhys.(*physical.Sort); ok && s.SortKey == agg.GroupKeys[0] {
+	if s, ok := childPhys.(*physical.Sort); ok && len(agg.GroupKeys) > 0 && s.SortKey == agg.GroupKeys[0] {
 		isSorted = true
 	}
 
@@ -206,6 +200,10 @@ func (p *PhysicalPlanner) planAggregate(agg *logical.LogicalAggregate) physical.
 		}
 	} else {
 		// Needs an explicit Sort node
+		if len(agg.GroupKeys) == 0 {
+			// Scalar aggregate (no GROUP BY)
+			return hashAgg
+		}
 		sortNode := &physical.Sort{
 			SortKey: agg.GroupKeys[0],
 			Child:   childPhys,
@@ -221,6 +219,34 @@ func (p *PhysicalPlanner) planAggregate(agg *logical.LogicalAggregate) physical.
 		return hashAgg
 	}
 	return streamAgg
+}
+
+func (p *PhysicalPlanner) planLimit(limit *logical.LogicalLimit) physical.PhysicalNode {
+	// Optimization: Top-N (Limit + Sort)
+	if sortNode, ok := limit.Child.(*logical.LogicalSort); ok {
+		childPhys := p.CreatePhysicalPlan(sortNode.Child)
+		topN := &physical.TopNSort{
+			SortKey: sortNode.SortKey,
+			Limit:   limit.Limit + limit.Offset,
+			Child:   childPhys,
+		}
+		// If there's an offset, we still need a Limit node to skip rows
+		if limit.Offset > 0 {
+			return &physical.Limit{
+				Limit:  limit.Limit,
+				Offset: limit.Offset,
+				Child:  topN,
+			}
+		}
+		return topN
+	}
+
+	childPhys := p.CreatePhysicalPlan(limit.Child)
+	return &physical.Limit{
+		Limit:  limit.Limit,
+		Offset: limit.Offset,
+		Child:  childPhys,
+	}
 }
 
 func (p *PhysicalPlanner) calculateJoinSelectivity(condition string, leftRows, rightRows float64) float64 {

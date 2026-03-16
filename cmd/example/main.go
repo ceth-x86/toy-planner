@@ -59,8 +59,10 @@ func main() {
 	fmt.Println("\nInitial Logical Plan:")
 	fmt.Println(sort1.String())
 
-	optLogical1 := optimizer.PushdownPredicates(sort1)
-	fmt.Println("\nOptimized Logical Plan (after Predicate Pushdown):")
+	// Consistent pipeline: Deduce -> Pushdown
+	deduced1 := optimizer.DeducePredicates(sort1)
+	optLogical1 := optimizer.PushdownPredicates(deduced1)
+	fmt.Println("\nOptimized Logical Plan (after Deduction + Pushdown):")
 	fmt.Println(optLogical1.String())
 
 	physPlan1 := planner.CreatePhysicalPlan(optLogical1)
@@ -85,18 +87,18 @@ func main() {
 	fmt.Println("\nInitial Logical Plan:")
 	fmt.Println(join2.String())
 
-	optLogical2 := optimizer.PushdownPredicates(join2)
-	fmt.Println("\nOptimized Logical Plan (after Predicate Pushdown):")
+	// Consistent pipeline
+	deduced2 := optimizer.DeducePredicates(join2)
+	optLogical2 := optimizer.PushdownPredicates(deduced2)
+	fmt.Println("\nOptimized Logical Plan:")
 	fmt.Println(optLogical2.String())
 
 	physPlan2 := planner.CreatePhysicalPlan(optLogical2)
-
 	fmt.Println("\nFinal Optimized Physical Plan (EXPLAIN):")
 	fmt.Println(physPlan2.Explain(0))
 	fmt.Printf("\nTotal Estimated Cost: %.2f\n", physPlan2.Cost())
 
-	// --- EXAMPLE 3: Aggregation (HashAggregate vs Sort + StreamAggregate) ---
-	// SELECT user_id, SUM(total) FROM Orders GROUP BY user_id
+	// --- EXAMPLE 3: Aggregation (GROUP BY user_id) ---
 	fmt.Println("\n========================================================")
 	fmt.Println("EXAMPLE 3: Aggregation (GROUP BY user_id)")
 	fmt.Println("========================================================")
@@ -111,10 +113,54 @@ func main() {
 	fmt.Println("\nInitial Logical Plan:")
 	fmt.Println(agg3.String())
 
-	optLogical3 := optimizer.PushdownPredicates(agg3)
+	// Consistent pipeline
+	deduced3 := optimizer.DeducePredicates(agg3)
+	optLogical3 := optimizer.PushdownPredicates(deduced3)
 	physPlan3 := planner.CreatePhysicalPlan(optLogical3)
 
 	fmt.Println("\nFinal Optimized Physical Plan (EXPLAIN):")
 	fmt.Println(physPlan3.Explain(0))
 	fmt.Printf("\nTotal Estimated Cost: %.2f\n", physPlan3.Cost())
+
+	// --- EXAMPLE 4: Top-N Optimization (Limit + Sort) ---
+	// SELECT * FROM Users JOIN Orders ON Users.id = Orders.user_id 
+	// WHERE Users.id = 42 ORDER BY total LIMIT 5
+	fmt.Println("\n========================================================")
+	fmt.Println("EXAMPLE 4: Top-N Optimization (Limit + Sort)")
+	fmt.Println("========================================================")
+
+	usersScan4 := &logical.LogicalScan{TableName: "Users"}
+	ordersScan4 := &logical.LogicalScan{TableName: "Orders"}
+	join4 := &logical.LogicalJoin{
+		Condition: "Users.id = Orders.user_id",
+		Left:      usersScan4,
+		Right:     ordersScan4,
+	}
+	filter4 := &logical.LogicalFilter{
+		Condition: "Users.id = 42",
+		Child:     join4,
+	}
+	sort4 := &logical.LogicalSort{
+		SortKey: "Orders.total",
+		Child:   filter4,
+	}
+	limit4 := &logical.LogicalLimit{
+		Limit:  5,
+		Offset: 0,
+		Child:  sort4,
+	}
+
+	fmt.Println("\nInitial Logical Plan:")
+	fmt.Println(limit4.String())
+
+	deduced4 := optimizer.DeducePredicates(limit4)
+	optLogical4 := optimizer.PushdownPredicates(deduced4)
+	fmt.Println("\nOptimized Logical Plan:")
+	fmt.Println(optLogical4.String())
+
+	physPlan4 := planner.CreatePhysicalPlan(optLogical4)
+
+	fmt.Println("\nFinal Optimized Physical Plan (EXPLAIN):")
+	fmt.Println(physPlan4.Explain(0))
+	fmt.Printf("\nTotal Estimated Cost: %.2f\n", physPlan4.Cost())
 }

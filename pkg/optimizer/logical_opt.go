@@ -45,6 +45,13 @@ func PushdownPredicates(node logical.LogicalNode) logical.LogicalNode {
 			Child:     PushdownPredicates(n.Child),
 		}
 
+	case *logical.LogicalLimit:
+		return &logical.LogicalLimit{
+			Limit:  n.Limit,
+			Offset: n.Offset,
+			Child:  PushdownPredicates(n.Child),
+		}
+
 	default:
 		return n
 	}
@@ -99,7 +106,8 @@ func pushFilterDown(f *logical.LogicalFilter) logical.LogicalNode {
 		}
 
 	default:
-		// Cannot push down further
+		// Note: We intentionally do NOT push filters below Limit,
+		// because filtering after limiting changes which rows are selected.
 		return f
 	}
 }

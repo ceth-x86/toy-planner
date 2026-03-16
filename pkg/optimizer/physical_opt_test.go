@@ -230,6 +230,41 @@ func TestPhysicalPlanner_Sort(t *testing.T) {
 	}
 }
 
+func TestPhysicalPlanner_TopNWithOffset(t *testing.T) {
+	cat := catalog.NewCatalog()
+	cat.RegisterTable(catalog.TableMetadata{Name: "Orders", RowCount: 100})
+	planner := NewPhysicalPlanner(cat)
+
+	// LIMIT 5 OFFSET 10 ORDER BY total
+	limit := &logical.LogicalLimit{
+		Limit:  5,
+		Offset: 10,
+		Child: &logical.LogicalSort{
+			SortKey: "total",
+			Child:   &logical.LogicalScan{TableName: "Orders"},
+		},
+	}
+
+	plan := planner.CreatePhysicalPlan(limit)
+	
+	// Should be Limit -> TopNSort
+	outerLimit, ok := plan.(*physical.Limit)
+	if !ok {
+		t.Fatalf("Expected outer Limit node for Offset, got %T", plan)
+	}
+	if outerLimit.Offset != 10 {
+		t.Errorf("Expected offset 10, got %d", outerLimit.Offset)
+	}
+
+	topN, ok := outerLimit.Child.(*physical.TopNSort)
+	if !ok {
+		t.Fatalf("Expected child TopNSort, got %T", outerLimit.Child)
+	}
+	if topN.Limit != 15 {
+		t.Errorf("Expected TopNSort limit to be 15 (5+10), got %d", topN.Limit)
+	}
+}
+
 func TestPhysicalPlanner_ScalarAggregate(t *testing.T) {
 	cat := catalog.NewCatalog()
 	cat.RegisterTable(catalog.TableMetadata{Name: "Orders", RowCount: 100})
@@ -292,6 +327,45 @@ func TestPhysicalPlanner_StreamAggregate_AlreadySorted(t *testing.T) {
 	// StreamAgg should win.
 	if _, ok := plan.(*physical.StreamAggregate); !ok {
 		t.Errorf("Expected StreamAggregate for pre-sorted input, got %T", plan)
+	}
+}
+
+func TestPhysicalPlanner_TopN(t *testing.T) {
+	cat := catalog.NewCatalog()
+	cat.RegisterTable(catalog.TableMetadata{Name: "Users", RowCount: 1000})
+	planner := NewPhysicalPlanner(cat)
+
+	// Limit(Sort(Scan)) -> TopNSort
+	tree := &logical.LogicalLimit{
+		Limit: 10,
+		Child: &logical.LogicalSort{
+			SortKey: "name",
+			Child:   &logical.LogicalScan{TableName: "Users"},
+		},
+	}
+	plan := planner.CreatePhysicalPlan(tree)
+	topN, ok := plan.(*physical.TopNSort)
+	if !ok {
+		t.Fatalf("Expected TopNSort, got %T", plan)
+	}
+	if topN.Limit != 10 {
+		t.Errorf("Expected limit 10, got %d", topN.Limit)
+	}
+}
+
+func TestPhysicalPlanner_LimitWithoutSort(t *testing.T) {
+	cat := catalog.NewCatalog()
+	cat.RegisterTable(catalog.TableMetadata{Name: "Users", RowCount: 1000})
+	planner := NewPhysicalPlanner(cat)
+
+	// Limit(Scan) -> Limit (no TopN fusion)
+	tree := &logical.LogicalLimit{
+		Limit: 10,
+		Child: &logical.LogicalScan{TableName: "Users"},
+	}
+	plan := planner.CreatePhysicalPlan(tree)
+	if _, ok := plan.(*physical.Limit); !ok {
+		t.Errorf("Expected Limit node, got %T", plan)
 	}
 }
 
