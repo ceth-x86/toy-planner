@@ -40,10 +40,27 @@ func (n *LogicalJoin) ReferencedTables() []string {
 			tables[t] = struct{}{}
 		}
 	}
-	
+
 	result := make([]string, 0, len(tables))
 	for table := range tables {
 		result = append(result, table)
 	}
 	return result
+}
+
+// Copy expects exactly 2 children (matching Children()).
+func (n *LogicalJoin) Copy(children []LogicalNode) LogicalNode {
+	return &LogicalJoin{
+		Condition: n.Condition,
+		Left:      children[0],
+		Right:     children[1],
+	}
+}
+
+func (n *LogicalJoin) Children() []LogicalNode {
+	return []LogicalNode{n.Left, n.Right}
+}
+
+func (n *LogicalJoin) SubtreeTables() []string {
+	return n.ReferencedTables()
 }

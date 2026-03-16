@@ -15,6 +15,10 @@ var (
 
 // CalculateSelectivity estimates the fraction of rows that satisfy a condition.
 // It uses the catalog to look up table statistics based on the condition string.
+//
+// Limitation: cross-table predicates like "A.x > B.y" are not supported
+// as filter conditions. They would be incorrectly treated as
+// single-table filters with a literal value of "B.y".
 func CalculateSelectivity(condition string, cat *catalog.Catalog) float64 {
 	// 1. Extract table and column name (e.g., "Users.id")
 	matches := tableColBaseRe.FindStringSubmatch(condition)
@@ -45,7 +49,12 @@ func CalculateSelectivity(condition string, cat *catalog.Catalog) float64 {
 		return 0.33 // Heuristic for range filters
 	}
 
-	// 4. Check for Equality: Table.Col = Value
+	// 4. Check for LIKE
+	if strings.Contains(strings.ToUpper(condition), " LIKE ") {
+		return 0.2 // Heuristic for LIKE filters
+	}
+
+	// 5. Check for Equality: Table.Col = Value
 	if strings.Contains(condition, "=") {
 		// Ensure it's not a join condition (which has another Table.Col on the right)
 		rightPart := strings.Split(condition, "=")[1]

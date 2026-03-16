@@ -43,9 +43,29 @@ func TestCalculateSelectivity(t *testing.T) {
 			expected:  0.33,
 		},
 		{
+			name:      "Inequality Greater-Equal",
+			condition: "Users.id >= 100",
+			expected:  0.33,
+		},
+		{
+			name:      "Inequality Less",
+			condition: "Users.id < 500",
+			expected:  0.33,
+		},
+		{
 			name:      "Not Equal",
 			condition: "Users.status != 'active'",
 			expected:  0.8, // 1 - 1/5 = 0.8
+		},
+		{
+			name:      "Not Equal Default",
+			condition: "Users.city != 'London'",
+			expected:  0.9, // 1 - 1/10 = 0.9
+		},
+		{
+			name:      "LIKE Filter",
+			condition: "Users.name LIKE 'A%'",
+			expected:  0.2,
 		},
 		{
 			name:      "Default (no table)",

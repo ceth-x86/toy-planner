@@ -15,6 +15,12 @@ type LogicalNode interface {
 	ToStringIndent(indent int) string
 	// ReferencedTables returns the tables involved in this node's subtree.
 	ReferencedTables() []string
+	// Copy returns a shallow copy of the node with new children.
+	Copy(children []LogicalNode) LogicalNode
+	// Children returns the immediate children of this node.
+	Children() []LogicalNode
+	// SubtreeTables returns all tables in the subtree.
+	SubtreeTables() []string
 }
 
 // ContainsTable checks if a list of tables contains a specific target.

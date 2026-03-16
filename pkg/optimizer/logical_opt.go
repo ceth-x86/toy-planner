@@ -4,6 +4,22 @@ import (
 	"toy-optimizer/pkg/logical"
 )
 
+// MapChildren applies a function to all children of a node and returns a new node.
+func MapChildren(node logical.LogicalNode, fn func(logical.LogicalNode) logical.LogicalNode) logical.LogicalNode {
+	if node == nil {
+		return nil
+	}
+	children := node.Children()
+	if len(children) == 0 {
+		return node.Copy(nil)
+	}
+	newChildren := make([]logical.LogicalNode, len(children))
+	for i, child := range children {
+		newChildren[i] = fn(child)
+	}
+	return node.Copy(newChildren)
+}
+
 // PushdownPredicates moves LogicalFilters as deep as possible in the tree.
 // It returns a NEW tree, leaving the original one intact.
 func PushdownPredicates(node logical.LogicalNode) logical.LogicalNode {
@@ -20,40 +36,8 @@ func PushdownPredicates(node logical.LogicalNode) logical.LogicalNode {
 		}
 		return pushFilterDown(newFilter)
 
-	case *logical.LogicalJoin:
-		// Return a new Join with optimized children
-		return &logical.LogicalJoin{
-			Condition: n.Condition,
-			Left:      PushdownPredicates(n.Left),
-			Right:     PushdownPredicates(n.Right),
-		}
-
-	case *logical.LogicalScan:
-		// Scans are leaves, just return as is
-		return &logical.LogicalScan{TableName: n.TableName}
-
-	case *logical.LogicalSort:
-		return &logical.LogicalSort{
-			SortKey: n.SortKey,
-			Child:   PushdownPredicates(n.Child),
-		}
-
-	case *logical.LogicalAggregate:
-		return &logical.LogicalAggregate{
-			GroupKeys: n.GroupKeys,
-			AggFuncs:  n.AggFuncs,
-			Child:     PushdownPredicates(n.Child),
-		}
-
-	case *logical.LogicalLimit:
-		return &logical.LogicalLimit{
-			Limit:  n.Limit,
-			Offset: n.Offset,
-			Child:  PushdownPredicates(n.Child),
-		}
-
 	default:
-		return n
+		return MapChildren(node, PushdownPredicates)
 	}
 }
 

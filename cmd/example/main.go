@@ -65,7 +65,11 @@ func main() {
 	fmt.Println("\nOptimized Logical Plan (after Deduction + Pushdown):")
 	fmt.Println(optLogical1.String())
 
-	physPlan1 := planner.CreatePhysicalPlan(optLogical1)
+	physPlan1, err := planner.CreatePhysicalPlan(optLogical1)
+	if err != nil {
+		fmt.Printf("Error creating physical plan: %v\n", err)
+		return
+	}
 	fmt.Println("\nFinal Optimized Physical Plan (EXPLAIN):")
 	fmt.Println(physPlan1.Explain(0))
 	fmt.Printf("\nTotal Estimated Cost: %.2f\n", physPlan1.Cost())
@@ -93,7 +97,11 @@ func main() {
 	fmt.Println("\nOptimized Logical Plan:")
 	fmt.Println(optLogical2.String())
 
-	physPlan2 := planner.CreatePhysicalPlan(optLogical2)
+	physPlan2, err := planner.CreatePhysicalPlan(optLogical2)
+	if err != nil {
+		fmt.Printf("Error creating physical plan: %v\n", err)
+		return
+	}
 	fmt.Println("\nFinal Optimized Physical Plan (EXPLAIN):")
 	fmt.Println(physPlan2.Explain(0))
 	fmt.Printf("\nTotal Estimated Cost: %.2f\n", physPlan2.Cost())
@@ -116,7 +124,11 @@ func main() {
 	// Consistent pipeline
 	deduced3 := optimizer.DeducePredicates(agg3)
 	optLogical3 := optimizer.PushdownPredicates(deduced3)
-	physPlan3 := planner.CreatePhysicalPlan(optLogical3)
+	physPlan3, err := planner.CreatePhysicalPlan(optLogical3)
+	if err != nil {
+		fmt.Printf("Error creating physical plan: %v\n", err)
+		return
+	}
 
 	fmt.Println("\nFinal Optimized Physical Plan (EXPLAIN):")
 	fmt.Println(physPlan3.Explain(0))
@@ -158,7 +170,11 @@ func main() {
 	fmt.Println("\nOptimized Logical Plan:")
 	fmt.Println(optLogical4.String())
 
-	physPlan4 := planner.CreatePhysicalPlan(optLogical4)
+	physPlan4, err := planner.CreatePhysicalPlan(optLogical4)
+	if err != nil {
+		fmt.Printf("Error creating physical plan: %v\n", err)
+		return
+	}
 
 	fmt.Println("\nFinal Optimized Physical Plan (EXPLAIN):")
 	fmt.Println(physPlan4.Explain(0))

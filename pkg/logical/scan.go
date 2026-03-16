@@ -21,3 +21,16 @@ func (n *LogicalScan) ToStringIndent(indent int) string {
 func (n *LogicalScan) ReferencedTables() []string {
 	return []string{n.TableName}
 }
+
+// Copy ignores children (Scan is a leaf node).
+func (n *LogicalScan) Copy(children []LogicalNode) LogicalNode {
+	return &LogicalScan{TableName: n.TableName}
+}
+
+func (n *LogicalScan) Children() []LogicalNode {
+	return nil
+}
+
+func (n *LogicalScan) SubtreeTables() []string {
+	return n.ReferencedTables()
+}

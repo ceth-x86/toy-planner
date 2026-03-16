@@ -31,3 +31,20 @@ func (n *LogicalLimit) ReferencedTables() []string {
 	}
 	return n.Child.ReferencedTables()
 }
+
+// Copy expects exactly 1 child (matching Children()).
+func (n *LogicalLimit) Copy(children []LogicalNode) LogicalNode {
+	return &LogicalLimit{
+		Limit:  n.Limit,
+		Offset: n.Offset,
+		Child:  children[0],
+	}
+}
+
+func (n *LogicalLimit) Children() []LogicalNode {
+	return []LogicalNode{n.Child}
+}
+
+func (n *LogicalLimit) SubtreeTables() []string {
+	return n.ReferencedTables()
+}

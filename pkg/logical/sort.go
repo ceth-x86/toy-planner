@@ -30,3 +30,19 @@ func (n *LogicalSort) ReferencedTables() []string {
 	}
 	return n.Child.ReferencedTables()
 }
+
+// Copy expects exactly 1 child (matching Children()).
+func (n *LogicalSort) Copy(children []LogicalNode) LogicalNode {
+	return &LogicalSort{
+		SortKey: n.SortKey,
+		Child:   children[0],
+	}
+}
+
+func (n *LogicalSort) Children() []LogicalNode {
+	return []LogicalNode{n.Child}
+}
+
+func (n *LogicalSort) SubtreeTables() []string {
+	return n.ReferencedTables()
+}

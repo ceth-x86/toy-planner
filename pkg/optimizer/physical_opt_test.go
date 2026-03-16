@@ -24,7 +24,10 @@ func TestPhysicalPlanner_ScanOptimization(t *testing.T) {
 		Child:     &logical.LogicalScan{TableName: "Users"},
 	}
 	
-	plan := planner.CreatePhysicalPlan(f)
+	plan, err := planner.CreatePhysicalPlan(f)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	if _, ok := plan.(*physical.IndexScan); !ok {
 		t.Errorf("Expected IndexScan, got %T", plan)
 	}
@@ -34,7 +37,10 @@ func TestPhysicalPlanner_ScanOptimization(t *testing.T) {
 		Condition: "Users.name = 'Alice'",
 		Child:     &logical.LogicalScan{TableName: "Users"},
 	}
-	plan2 := planner.CreatePhysicalPlan(f2)
+	plan2, err := planner.CreatePhysicalPlan(f2)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	selection, ok := plan2.(*physical.Selection)
 	if !ok {
 		t.Errorf("Expected Selection node, got %T", plan2)
@@ -57,7 +63,10 @@ func TestPhysicalPlanner_JoinOrdering(t *testing.T) {
 		Right:     &logical.LogicalScan{TableName: "Users"},
 	}
 
-	plan := planner.CreatePhysicalPlan(join)
+	plan, err := planner.CreatePhysicalPlan(join)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	
 	hj, ok := plan.(*physical.HashJoin)
 	if !ok {
@@ -87,7 +96,10 @@ func TestPhysicalPlanner_CardinalityEstimation(t *testing.T) {
 		Child:     &logical.LogicalScan{TableName: "Users"},
 	}
 	
-	plan := planner.CreatePhysicalPlan(f)
+	plan, err := planner.CreatePhysicalPlan(f)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	if plan.Rows() != 100 {
 		t.Errorf("Expected 100 estimated rows, got %f", plan.Rows())
 	}
@@ -107,7 +119,10 @@ func TestPhysicalPlanner_StackedFilters(t *testing.T) {
 	filter2 := &logical.LogicalFilter{Condition: "Users.gender = 'F'", Child: scan}
 	filter1 := &logical.LogicalFilter{Condition: "Users.city = 'London'", Child: filter2}
 	
-	plan := planner.CreatePhysicalPlan(filter1)
+	plan, err := planner.CreatePhysicalPlan(filter1)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	if plan.Rows() != 50 {
 		t.Errorf("Expected 50 estimated rows for stacked filters, got %f", plan.Rows())
 	}
@@ -140,7 +155,10 @@ func TestPhysicalPlanner_ImmutableNodes(t *testing.T) {
 		Child:     join,
 	}
 
-	plan := planner.CreatePhysicalPlan(filter)
+	plan, err := planner.CreatePhysicalPlan(filter)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	selection, ok := plan.(*physical.Selection)
 	if !ok {
 		t.Fatalf("Expected top node to be Selection")
@@ -156,20 +174,16 @@ func TestPhysicalPlanner_ImmutableNodes(t *testing.T) {
 	}
 }
 
-func TestPhysicalPlanner_MissingTablePanic(t *testing.T) {
+func TestPhysicalPlanner_MissingTableError(t *testing.T) {
 	cat := catalog.NewCatalog()
 	planner := NewPhysicalPlanner(cat)
-	
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("The code did not panic on missing table")
-		}
-	}()
-	
-	scan := &logical.LogicalScan{TableName: "Unknown"}
-	planner.CreatePhysicalPlan(scan)
-}
 
+	scan := &logical.LogicalScan{TableName: "Unknown"}
+	_, err := planner.CreatePhysicalPlan(scan)
+	if err == nil {
+		t.Errorf("Expected error for missing table, got nil")
+	}
+}
 func TestPhysicalPlanner_JoinSelectivityFallback(t *testing.T) {
 	cat := catalog.NewCatalog()
 	cat.RegisterTable(catalog.TableMetadata{Name: "Users", RowCount: 100})
@@ -183,7 +197,10 @@ func TestPhysicalPlanner_JoinSelectivityFallback(t *testing.T) {
 		Right:     &logical.LogicalScan{TableName: "Orders"},
 	}
 
-	plan := planner.CreatePhysicalPlan(join)
+	plan, err := planner.CreatePhysicalPlan(join)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	
 	if plan.Rows() != 100 {
 		t.Errorf("Expected fallback rows 100, got %f", plan.Rows())
@@ -203,7 +220,10 @@ func TestPhysicalPlanner_HashJoinChoice(t *testing.T) {
 		Right:     &logical.LogicalScan{TableName: "BigB"},
 	}
 
-	plan := planner.CreatePhysicalPlan(join)
+	plan, err := planner.CreatePhysicalPlan(join)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	
 	if _, ok := plan.(*physical.HashJoin); !ok {
 		t.Errorf("Expected HashJoin for large unindexed tables, got %T", plan)
@@ -220,7 +240,10 @@ func TestPhysicalPlanner_Sort(t *testing.T) {
 		Child:   &logical.LogicalScan{TableName: "Users"},
 	}
 
-	plan := planner.CreatePhysicalPlan(sort)
+	plan, err := planner.CreatePhysicalPlan(sort)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	s, ok := plan.(*physical.Sort)
 	if !ok {
 		t.Fatalf("Expected Sort physical node")
@@ -245,7 +268,10 @@ func TestPhysicalPlanner_TopNWithOffset(t *testing.T) {
 		},
 	}
 
-	plan := planner.CreatePhysicalPlan(limit)
+	plan, err := planner.CreatePhysicalPlan(limit)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	
 	// Should be Limit -> TopNSort
 	outerLimit, ok := plan.(*physical.Limit)
@@ -277,8 +303,11 @@ func TestPhysicalPlanner_ScalarAggregate(t *testing.T) {
 		Child:     &logical.LogicalScan{TableName: "Orders"},
 	}
 
-	// Should not panic and should return a HashAggregate (scalar)
-	plan := planner.CreatePhysicalPlan(agg)
+	// Should not return an error and should return a HashAggregate (scalar)
+	plan, err := planner.CreatePhysicalPlan(agg)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	if _, ok := plan.(*physical.HashAggregate); !ok {
 		t.Errorf("Expected HashAggregate for scalar aggregate, got %T", plan)
 	}
@@ -295,7 +324,10 @@ func TestPhysicalPlanner_Aggregate(t *testing.T) {
 		Child:     &logical.LogicalScan{TableName: "Orders"},
 	}
 
-	plan := planner.CreatePhysicalPlan(agg)
+	plan, err := planner.CreatePhysicalPlan(agg)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	// HashAgg cost = 5000 + (5000 * 1.5) = 12500
 	// StreamAgg cost = 5000 + (5000 * log2(5000)) + 5000 = 10000 + ~61000 = large
 	// HashAgg should be chosen.
@@ -319,7 +351,10 @@ func TestPhysicalPlanner_StreamAggregate_AlreadySorted(t *testing.T) {
 		},
 	}
 
-	plan := planner.CreatePhysicalPlan(agg)
+	plan, err := planner.CreatePhysicalPlan(agg)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	
 	// Since child is Sort(user_id), planner should recognize it and choose StreamAggregate.
 	// Cost(HashAgg) = (Cost(Sort)+100) + 100 * 1.5
@@ -343,7 +378,10 @@ func TestPhysicalPlanner_TopN(t *testing.T) {
 			Child:   &logical.LogicalScan{TableName: "Users"},
 		},
 	}
-	plan := planner.CreatePhysicalPlan(tree)
+	plan, err := planner.CreatePhysicalPlan(tree)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	topN, ok := plan.(*physical.TopNSort)
 	if !ok {
 		t.Fatalf("Expected TopNSort, got %T", plan)
@@ -363,7 +401,10 @@ func TestPhysicalPlanner_LimitWithoutSort(t *testing.T) {
 		Limit: 10,
 		Child: &logical.LogicalScan{TableName: "Users"},
 	}
-	plan := planner.CreatePhysicalPlan(tree)
+	plan, err := planner.CreatePhysicalPlan(tree)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	if _, ok := plan.(*physical.Limit); !ok {
 		t.Errorf("Expected Limit node, got %T", plan)
 	}
@@ -391,7 +432,10 @@ func TestPhysicalPlanner_FilterAboveJoin(t *testing.T) {
 	}
 
 	planner := NewPhysicalPlanner(cat)
-	plan := planner.CreatePhysicalPlan(filter)
+	plan, err := planner.CreatePhysicalPlan(filter)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	
 	if plan.Rows() != 1650 {
 		t.Errorf("Expected 1650 rows for filter above join, got %f", plan.Rows())
@@ -403,12 +447,19 @@ func TestPhysicalPlanner_EdgeCases(t *testing.T) {
 	cat.RegisterTable(catalog.TableMetadata{Name: "Empty", RowCount: 0})
 	planner := NewPhysicalPlanner(cat)
 
-	if planner.CreatePhysicalPlan(nil) != nil {
+	res, err := planner.CreatePhysicalPlan(nil)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if res != nil {
 		t.Error("Expected nil for nil logical node")
 	}
 
 	scan := &logical.LogicalScan{TableName: "Empty"}
-	plan := planner.CreatePhysicalPlan(scan)
+	plan, err := planner.CreatePhysicalPlan(scan)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	if plan.Cost() != 0 || plan.Rows() != 0 {
 		t.Errorf("Empty table should have 0 cost and rows, got cost=%f rows=%f", plan.Cost(), plan.Rows())
 	}

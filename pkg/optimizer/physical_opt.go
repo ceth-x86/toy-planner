@@ -10,8 +10,8 @@ import (
 )
 
 var (
-	// eqFilterRe matches equality filters like "Table.Col = Value"
-	eqFilterRe = regexp.MustCompile(`([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\s*=\s*(.+)`)
+	// eqFilterRe matches equality filters like "Table.Col = Value" but NOT "Table.Col = OtherTable.Col"
+	eqFilterRe = regexp.MustCompile(`([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\s*=\s*([^.]+)$`)
 	// joinCondRe matches join conditions like "TableA.Col1 = TableB.Col2"
 	joinCondRe = regexp.MustCompile(`([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\s*=\s*([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)`)
 )
@@ -26,9 +26,10 @@ func NewPhysicalPlanner(cat *catalog.Catalog) *PhysicalPlanner {
 }
 
 // CreatePhysicalPlan recursively builds the cheapest physical plan.
-func (p *PhysicalPlanner) CreatePhysicalPlan(node logical.LogicalNode) physical.PhysicalNode {
+// Returns an error if a table or column referenced in the logical node is missing from the catalog.
+func (p *PhysicalPlanner) CreatePhysicalPlan(node logical.LogicalNode) (physical.PhysicalNode, error) {
 	if node == nil {
-		return nil
+		return nil, nil
 	}
 
 	switch n := node.(type) {
@@ -39,13 +40,16 @@ func (p *PhysicalPlanner) CreatePhysicalPlan(node logical.LogicalNode) physical.
 		}
 
 		// General filter application
-		childPhys := p.CreatePhysicalPlan(n.Child)
+		childPhys, err := p.CreatePhysicalPlan(n.Child)
+		if err != nil {
+			return nil, err
+		}
 		selectivity := CalculateSelectivity(n.Condition, p.catalog)
 		return &physical.Selection{
 			Condition:   n.Condition,
 			Child:       childPhys,
 			Selectivity: selectivity,
-		}
+		}, nil
 
 	case *logical.LogicalJoin:
 		return p.planJoin(n)
@@ -53,19 +57,22 @@ func (p *PhysicalPlanner) CreatePhysicalPlan(node logical.LogicalNode) physical.
 	case *logical.LogicalScan:
 		meta, ok := p.catalog.GetTable(n.TableName)
 		if !ok {
-			panic(fmt.Sprintf("table %q not found in catalog", n.TableName))
+			return nil, fmt.Errorf("table %q not found in catalog", n.TableName)
 		}
 		return &physical.SeqScan{
 			TableName: n.TableName,
 			RowCount:  meta.RowCount,
-		}
+		}, nil
 
 	case *logical.LogicalSort:
-		childPhys := p.CreatePhysicalPlan(n.Child)
+		childPhys, err := p.CreatePhysicalPlan(n.Child)
+		if err != nil {
+			return nil, err
+		}
 		return &physical.Sort{
 			SortKey: n.SortKey,
 			Child:   childPhys,
-		}
+		}, nil
 
 	case *logical.LogicalAggregate:
 		return p.planAggregate(n)
@@ -74,14 +81,14 @@ func (p *PhysicalPlanner) CreatePhysicalPlan(node logical.LogicalNode) physical.
 		return p.planLimit(n)
 
 	default:
-		return nil
+		return nil, nil
 	}
 }
 
-func (p *PhysicalPlanner) planScanWithFilter(f *logical.LogicalFilter, s *logical.LogicalScan) physical.PhysicalNode {
+func (p *PhysicalPlanner) planScanWithFilter(f *logical.LogicalFilter, s *logical.LogicalScan) (physical.PhysicalNode, error) {
 	meta, ok := p.catalog.GetTable(s.TableName)
 	if !ok {
-		panic(fmt.Sprintf("table %q not found in catalog", s.TableName))
+		return nil, fmt.Errorf("table %q not found in catalog", s.TableName)
 	}
 
 	selectivity := CalculateSelectivity(f.Condition, p.catalog)
@@ -119,18 +126,27 @@ func (p *PhysicalPlanner) planScanWithFilter(f *logical.LogicalFilter, s *logica
 			}
 
 			if indexScan.Cost() < physSeq.Cost() {
-				return indexScan
+				return indexScan, nil
 			}
 		}
 	}
-	return physSeq
+	return physSeq, nil
 }
 
-func (p *PhysicalPlanner) planJoin(j *logical.LogicalJoin) physical.PhysicalNode {
-	leftPhys := p.CreatePhysicalPlan(j.Left)
-	rightPhys := p.CreatePhysicalPlan(j.Right)
+func (p *PhysicalPlanner) planJoin(j *logical.LogicalJoin) (physical.PhysicalNode, error) {
+	leftPhys, err := p.CreatePhysicalPlan(j.Left)
+	if err != nil {
+		return nil, err
+	}
+	rightPhys, err := p.CreatePhysicalPlan(j.Right)
+	if err != nil {
+		return nil, err
+	}
 
-	selectivity := p.calculateJoinSelectivity(j.Condition, leftPhys.Rows(), rightPhys.Rows())
+	selectivity, err := p.calculateJoinSelectivity(j.Condition, leftPhys.Rows(), rightPhys.Rows())
+	if err != nil {
+		return nil, err
+	}
 
 	// NLJ candidates: competitive when left side produces very few rows
 	// (e.g., single-row index lookup); otherwise HashJoin dominates O(N+M).
@@ -174,11 +190,14 @@ func (p *PhysicalPlanner) planJoin(j *logical.LogicalJoin) physical.PhysicalNode
 		}
 	}
 
-	return winner
+	return winner, nil
 }
 
-func (p *PhysicalPlanner) planAggregate(agg *logical.LogicalAggregate) physical.PhysicalNode {
-	childPhys := p.CreatePhysicalPlan(agg.Child)
+func (p *PhysicalPlanner) planAggregate(agg *logical.LogicalAggregate) (physical.PhysicalNode, error) {
+	childPhys, err := p.CreatePhysicalPlan(agg.Child)
+	if err != nil {
+		return nil, err
+	}
 
 	hashAgg := &physical.HashAggregate{
 		GroupKeys: agg.GroupKeys,
@@ -202,7 +221,7 @@ func (p *PhysicalPlanner) planAggregate(agg *logical.LogicalAggregate) physical.
 		// Needs an explicit Sort node
 		if len(agg.GroupKeys) == 0 {
 			// Scalar aggregate (no GROUP BY)
-			return hashAgg
+			return hashAgg, nil
 		}
 		sortNode := &physical.Sort{
 			SortKey: agg.GroupKeys[0],
@@ -216,15 +235,18 @@ func (p *PhysicalPlanner) planAggregate(agg *logical.LogicalAggregate) physical.
 	}
 
 	if hashAgg.Cost() <= streamAgg.Cost() {
-		return hashAgg
+		return hashAgg, nil
 	}
-	return streamAgg
+	return streamAgg, nil
 }
 
-func (p *PhysicalPlanner) planLimit(limit *logical.LogicalLimit) physical.PhysicalNode {
+func (p *PhysicalPlanner) planLimit(limit *logical.LogicalLimit) (physical.PhysicalNode, error) {
 	// Optimization: Top-N (Limit + Sort)
 	if sortNode, ok := limit.Child.(*logical.LogicalSort); ok {
-		childPhys := p.CreatePhysicalPlan(sortNode.Child)
+		childPhys, err := p.CreatePhysicalPlan(sortNode.Child)
+		if err != nil {
+			return nil, err
+		}
 		topN := &physical.TopNSort{
 			SortKey: sortNode.SortKey,
 			Limit:   limit.Limit + limit.Offset,
@@ -236,20 +258,23 @@ func (p *PhysicalPlanner) planLimit(limit *logical.LogicalLimit) physical.Physic
 				Limit:  limit.Limit,
 				Offset: limit.Offset,
 				Child:  topN,
-			}
+			}, nil
 		}
-		return topN
+		return topN, nil
 	}
 
-	childPhys := p.CreatePhysicalPlan(limit.Child)
+	childPhys, err := p.CreatePhysicalPlan(limit.Child)
+	if err != nil {
+		return nil, err
+	}
 	return &physical.Limit{
 		Limit:  limit.Limit,
 		Offset: limit.Offset,
 		Child:  childPhys,
-	}
+	}, nil
 }
 
-func (p *PhysicalPlanner) calculateJoinSelectivity(condition string, leftRows, rightRows float64) float64 {
+func (p *PhysicalPlanner) calculateJoinSelectivity(condition string, leftRows, rightRows float64) (float64, error) {
 	matches := joinCondRe.FindStringSubmatch(condition)
 
 	maxNDV := 0.0
@@ -259,11 +284,11 @@ func (p *PhysicalPlanner) calculateJoinSelectivity(condition string, leftRows, r
 
 		meta1, ok1 := p.catalog.GetTable(t1)
 		if !ok1 {
-			panic(fmt.Sprintf("table %q (from join condition) not found in catalog", t1))
+			return 0, fmt.Errorf("table %q (from join condition) not found in catalog", t1)
 		}
 		meta2, ok2 := p.catalog.GetTable(t2)
 		if !ok2 {
-			panic(fmt.Sprintf("table %q (from join condition) not found in catalog", t2))
+			return 0, fmt.Errorf("table %q (from join condition) not found in catalog", t2)
 		}
 
 		ndv1 := float64(meta1.ColumnNDVs[c1])
@@ -280,9 +305,9 @@ func (p *PhysicalPlanner) calculateJoinSelectivity(condition string, leftRows, r
 	if maxNDV == 0 {
 		maxNDV = math.Max(leftRows, rightRows)
 		if maxNDV == 0 {
-			return 1.0
+			return 1.0, nil
 		}
 	}
 
-	return 1.0 / maxNDV
+	return 1.0 / maxNDV, nil
 }

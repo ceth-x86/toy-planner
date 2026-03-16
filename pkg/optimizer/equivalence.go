@@ -21,18 +21,18 @@ func DeducePredicates(node logical.LogicalNode) logical.LogicalNode {
 	filter, ok := node.(*logical.LogicalFilter)
 	if !ok {
 		// Recursively process children for other nodes
-		return deduceRecursively(node)
+		return MapChildren(node, DeducePredicates)
 	}
 
 	join, ok := filter.Child.(*logical.LogicalJoin)
 	if !ok {
-		return deduceRecursively(node)
+		return MapChildren(node, DeducePredicates)
 	}
 
 	// Parse join condition: TableA.Col1 = TableB.Col2
 	joinMatches := joinCondRe.FindStringSubmatch(join.Condition)
 	if len(joinMatches) == 0 {
-		return deduceRecursively(node)
+		return MapChildren(node, DeducePredicates)
 	}
 
 	t1, c1 := joinMatches[1], joinMatches[2]
@@ -41,7 +41,7 @@ func DeducePredicates(node logical.LogicalNode) logical.LogicalNode {
 	// Parse filter condition: Table.Col = Value
 	filterMatches := eqFilterRe.FindStringSubmatch(filter.Condition)
 	if len(filterMatches) == 0 {
-		return deduceRecursively(node)
+		return MapChildren(node, DeducePredicates)
 	}
 
 	ft, fc := filterMatches[1], filterMatches[2]
@@ -63,49 +63,10 @@ func DeducePredicates(node logical.LogicalNode) logical.LogicalNode {
 			Condition: deducedCondition,
 			Child: &logical.LogicalFilter{
 				Condition: filter.Condition,
-				Child:     deduceRecursively(join),
+				Child:     MapChildren(join, DeducePredicates),
 			},
 		}
 	}
 
-	return deduceRecursively(node)
-}
-
-func deduceRecursively(node logical.LogicalNode) logical.LogicalNode {
-	switch n := node.(type) {
-	case *logical.LogicalFilter:
-		return &logical.LogicalFilter{
-			Condition: n.Condition,
-			Child:     DeducePredicates(n.Child),
-		}
-	case *logical.LogicalJoin:
-		return &logical.LogicalJoin{
-			Condition: n.Condition,
-			Left:      DeducePredicates(n.Left),
-			Right:     DeducePredicates(n.Right),
-		}
-	case *logical.LogicalSort:
-		return &logical.LogicalSort{
-			SortKey: n.SortKey,
-			Child:   DeducePredicates(n.Child),
-		}
-	case *logical.LogicalAggregate:
-		return &logical.LogicalAggregate{
-			GroupKeys: n.GroupKeys,
-			AggFuncs:  n.AggFuncs,
-			Child:     DeducePredicates(n.Child),
-		}
-	case *logical.LogicalLimit:
-		return &logical.LogicalLimit{
-			Limit:  n.Limit,
-			Offset: n.Offset,
-			Child:  DeducePredicates(n.Child),
-		}
-	case *logical.LogicalScan:
-		return &logical.LogicalScan{
-			TableName: n.TableName,
-		}
-	default:
-		return n
-	}
+	return MapChildren(node, DeducePredicates)
 }
