@@ -60,6 +60,13 @@ func (p *PhysicalPlanner) CreatePhysicalPlan(node logical.LogicalNode) physical.
 			RowCount:  meta.RowCount,
 		}
 
+	case *logical.LogicalSort:
+		childPhys := p.CreatePhysicalPlan(n.Child)
+		return &physical.Sort{
+			SortKey: n.SortKey,
+			Child:   childPhys,
+		}
+
 	default:
 		return nil
 	}
@@ -117,27 +124,51 @@ func (p *PhysicalPlanner) planJoin(j *logical.LogicalJoin) physical.PhysicalNode
 	leftPhys := p.CreatePhysicalPlan(j.Left)
 	rightPhys := p.CreatePhysicalPlan(j.Right)
 
-	// Calculate join selectivity based on NDV or row counts
 	selectivity := p.calculateJoinSelectivity(j.Condition, leftPhys.Rows(), rightPhys.Rows())
 
-	order1 := &physical.NestedLoopJoin{
+	// NLJ candidates: competitive when left side produces very few rows
+	// (e.g., single-row index lookup); otherwise HashJoin dominates O(N+M).
+	nlj1 := &physical.NestedLoopJoin{
 		Condition:       j.Condition,
 		Left:            leftPhys,
 		Right:           rightPhys,
 		JoinSelectivity: selectivity,
 	}
 
-	order2 := &physical.NestedLoopJoin{
+	nlj2 := &physical.NestedLoopJoin{
 		Condition:       j.Condition,
 		Left:            rightPhys,
 		Right:           leftPhys,
 		JoinSelectivity: selectivity,
 	}
 
-	if order1.Cost() <= order2.Cost() {
-		return order1
+	hj1 := &physical.HashJoin{
+		Condition:       j.Condition,
+		Left:            leftPhys,
+		Right:           rightPhys,
+		JoinSelectivity: selectivity,
 	}
-	return order2
+
+	hj2 := &physical.HashJoin{
+		Condition:       j.Condition,
+		Left:            rightPhys,
+		Right:           leftPhys,
+		JoinSelectivity: selectivity,
+	}
+
+	// Compare all candidates and pick the cheapest
+	candidates := []physical.PhysicalNode{nlj1, nlj2, hj1, hj2}
+	var winner physical.PhysicalNode = nlj1
+	minCost := nlj1.Cost()
+
+	for _, c := range candidates[1:] {
+		if c.Cost() < minCost {
+			minCost = c.Cost()
+			winner = c
+		}
+	}
+
+	return winner
 }
 
 func (p *PhysicalPlanner) calculateJoinSelectivity(condition string, leftRows, rightRows float64) float64 {
@@ -164,11 +195,9 @@ func (p *PhysicalPlanner) calculateJoinSelectivity(condition string, leftRows, r
 		if ndv2 > maxNDV { maxNDV = ndv2 }
 	}
 
-	// Fallback: If stats are missing (maxNDV == 0), use common heuristic:
-	// Result size is roughly the size of the larger table (selectivity = 1 / max(L, R))
 	if maxNDV == 0 {
 		maxNDV = math.Max(leftRows, rightRows)
-		if maxNDV == 0 { return 1.0 } // Still 0 if both tables are empty
+		if maxNDV == 0 { return 1.0 }
 	}
 	
 	return 1.0 / maxNDV

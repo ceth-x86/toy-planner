@@ -123,3 +123,50 @@ func TestPushdownPredicates_NestedJoins(t *testing.T) {
 		t.Errorf("Filter didn't push down to the leaf Scan! Got: %s", j1.Left.String())
 	}
 }
+
+func TestPushdownThroughSort(t *testing.T) {
+	tree := &logical.LogicalFilter{
+		Condition: "Users.id = 1",
+		Child: &logical.LogicalSort{
+			SortKey: "name",
+			Child:   &logical.LogicalScan{TableName: "Users"},
+		},
+	}
+	result := PushdownPredicates(tree)
+
+	sort, ok := result.(*logical.LogicalSort)
+	if !ok {
+		t.Fatalf("Expected Sort at root, got %T", result)
+	}
+	if _, ok := sort.Child.(*logical.LogicalFilter); !ok {
+		t.Errorf("Expected Filter pushed below Sort, got %T", sort.Child)
+	}
+}
+
+func TestPushdownThroughSortAndJoin(t *testing.T) {
+	tree := &logical.LogicalFilter{
+		Condition: "Users.id = 1",
+		Child: &logical.LogicalSort{
+			SortKey: "name",
+			Child: &logical.LogicalJoin{
+				Condition: "Users.id = Orders.user_id",
+				Left:      &logical.LogicalScan{TableName: "Users"},
+				Right:     &logical.LogicalScan{TableName: "Orders"},
+			},
+		},
+	}
+	result := PushdownPredicates(tree)
+
+	sort, ok := result.(*logical.LogicalSort)
+	if !ok {
+		t.Fatalf("Expected Sort at root, got %T", result)
+	}
+	join, ok := sort.Child.(*logical.LogicalJoin)
+	if !ok {
+		t.Fatalf("Expected Join below Sort, got %T", sort.Child)
+	}
+	// Filter should have pushed through Sort AND through Join to reach Users scan
+	if _, ok := join.Left.(*logical.LogicalFilter); !ok {
+		t.Errorf("Expected Filter pushed to left of Join, got %T", join.Left)
+	}
+}

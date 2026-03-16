@@ -24,8 +24,8 @@ The project is divided into several Go packages:
 - [x] Physical Planning: Selection of optimal execution strategies.
 - [x] Cardinality Estimation: Selectivity rules and NDV integration.
 - [x] Plan Visualization (EXPLAIN): Human-readable text representation of the physical plan.
+- [x] Advanced Physical Operators: HashJoin and Sort nodes.
 - [ ] Aggregation and Grouping: HashAggregate and StreamAggregate.
-- [ ] Advanced Physical Operators: HashJoin and Sort nodes.
 - [ ] Equivalence Classes: Transitive closure for smart predicates.
 - [ ] LIMIT and Top-N Optimization: TopNSort and Limit operators.
 

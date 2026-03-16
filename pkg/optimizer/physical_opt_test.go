@@ -45,13 +45,12 @@ func TestPhysicalPlanner_ScanOptimization(t *testing.T) {
 
 func TestPhysicalPlanner_JoinOrdering(t *testing.T) {
 	cat := catalog.NewCatalog()
-	// Large table (Orders) and Small table (Users)
-	cat.RegisterTable(catalog.TableMetadata{Name: "Users", RowCount: 10, Indexes: []string{"id"}})
-	cat.RegisterTable(catalog.TableMetadata{Name: "Orders", RowCount: 1000})
+	// Users (10 rows), Orders (1000 rows).
+	cat.RegisterTable(catalog.TableMetadata{Name: "Users", RowCount: 10, Indexes: []string{"id"}, ColumnNDVs: map[string]int{"id": 10}})
+	cat.RegisterTable(catalog.TableMetadata{Name: "Orders", RowCount: 1000, ColumnNDVs: map[string]int{"user_id": 10}})
 	
 	planner := NewPhysicalPlanner(cat)
 
-	// Join(Orders, Users)
 	join := &logical.LogicalJoin{
 		Condition: "Users.id = Orders.user_id",
 		Left:      &logical.LogicalScan{TableName: "Orders"},
@@ -59,15 +58,16 @@ func TestPhysicalPlanner_JoinOrdering(t *testing.T) {
 	}
 
 	plan := planner.CreatePhysicalPlan(join)
-	nlj, ok := plan.(*physical.NestedLoopJoin)
+	
+	hj, ok := plan.(*physical.HashJoin)
 	if !ok {
-		t.Fatalf("Expected NestedLoopJoin")
+		t.Fatalf("Expected HashJoin, got %T", plan)
 	}
-
-	// Check if Users is on the left
-	leftScan, ok := nlj.Left.(*physical.SeqScan)
+	
+	// Users (10 rows) should be the build side (Left) for cheapest HashJoin
+	leftScan, ok := hj.Left.(*physical.SeqScan)
 	if !ok || leftScan.TableName != "Users" {
-		t.Errorf("Expected Users on the left for cheaper join order, got %v", nlj.Left)
+		t.Errorf("Expected Users as build side (Left), got %v", hj.Left)
 	}
 }
 
@@ -146,17 +146,13 @@ func TestPhysicalPlanner_ImmutableNodes(t *testing.T) {
 		t.Fatalf("Expected top node to be Selection")
 	}
 
-	nlj, ok := selection.Child.(*physical.NestedLoopJoin)
-	if !ok {
-		t.Fatalf("Expected NestedLoopJoin")
-	}
-
+	// Verify join exists and rows are correct
 	if plan.Rows() != 1 {
 		t.Errorf("Expected 1 final row, got %f", plan.Rows())
 	}
 
-	if nlj.Rows() != 1000 {
-		t.Errorf("Join rows corrupted! Expected 1000, got %f", nlj.Rows())
+	if selection.Child.Rows() != 1000 {
+		t.Errorf("Join rows corrupted! Expected 1000, got %f", selection.Child.Rows())
 	}
 }
 
@@ -191,6 +187,46 @@ func TestPhysicalPlanner_JoinSelectivityFallback(t *testing.T) {
 	
 	if plan.Rows() != 100 {
 		t.Errorf("Expected fallback rows 100, got %f", plan.Rows())
+	}
+}
+
+func TestPhysicalPlanner_HashJoinChoice(t *testing.T) {
+	cat := catalog.NewCatalog()
+	cat.RegisterTable(catalog.TableMetadata{Name: "BigA", RowCount: 10000, ColumnNDVs: map[string]int{"id": 10000}})
+	cat.RegisterTable(catalog.TableMetadata{Name: "BigB", RowCount: 10000, ColumnNDVs: map[string]int{"id": 10000}})
+	
+	planner := NewPhysicalPlanner(cat)
+
+	join := &logical.LogicalJoin{
+		Condition: "BigA.id = BigB.id",
+		Left:      &logical.LogicalScan{TableName: "BigA"},
+		Right:     &logical.LogicalScan{TableName: "BigB"},
+	}
+
+	plan := planner.CreatePhysicalPlan(join)
+	
+	if _, ok := plan.(*physical.HashJoin); !ok {
+		t.Errorf("Expected HashJoin for large unindexed tables, got %T", plan)
+	}
+}
+
+func TestPhysicalPlanner_Sort(t *testing.T) {
+	cat := catalog.NewCatalog()
+	cat.RegisterTable(catalog.TableMetadata{Name: "Users", RowCount: 100})
+	planner := NewPhysicalPlanner(cat)
+
+	sort := &logical.LogicalSort{
+		SortKey: "name",
+		Child:   &logical.LogicalScan{TableName: "Users"},
+	}
+
+	plan := planner.CreatePhysicalPlan(sort)
+	s, ok := plan.(*physical.Sort)
+	if !ok {
+		t.Fatalf("Expected Sort physical node")
+	}
+	if s.SortKey != "name" {
+		t.Errorf("Expected sort key 'name', got %s", s.SortKey)
 	}
 }
 

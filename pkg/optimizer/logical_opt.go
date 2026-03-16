@@ -29,8 +29,14 @@ func PushdownPredicates(node logical.LogicalNode) logical.LogicalNode {
 		}
 
 	case *logical.LogicalScan:
-		// Scans are leaves, just return as is (scans are immutable anyway)
+		// Scans are leaves, just return as is
 		return &logical.LogicalScan{TableName: n.TableName}
+
+	case *logical.LogicalSort:
+		return &logical.LogicalSort{
+			SortKey: n.SortKey,
+			Child:   PushdownPredicates(n.Child),
+		}
 
 	default:
 		return n
@@ -48,9 +54,7 @@ func pushFilterDown(f *logical.LogicalFilter) logical.LogicalNode {
 		leftTables := child.Left.ReferencedTables()
 		rightTables := child.Right.ReferencedTables()
 
-		// If all tables in filter are in the left child, push it left
 		if logical.AllTablesIn(filterTables, leftTables) {
-			// Create a NEW Join with a NEW Filter on the left side
 			newLeft := &logical.LogicalFilter{
 				Condition: f.Condition,
 				Child:     child.Left,
@@ -62,9 +66,7 @@ func pushFilterDown(f *logical.LogicalFilter) logical.LogicalNode {
 			}
 		}
 
-		// If all tables in filter are in the right child, push it right
 		if logical.AllTablesIn(filterTables, rightTables) {
-			// Create a NEW Join with a NEW Filter on the right side
 			newRight := &logical.LogicalFilter{
 				Condition: f.Condition,
 				Child:     child.Right,
@@ -75,9 +77,19 @@ func pushFilterDown(f *logical.LogicalFilter) logical.LogicalNode {
 				Right:     PushdownPredicates(newRight),
 			}
 		}
-
-		// Otherwise, keep filter above join
 		return f
+
+	case *logical.LogicalSort:
+		// Transformation: Filter(Sort(Child)) -> Sort(Filter(Child))
+		newFilter := &logical.LogicalFilter{
+			Condition: f.Condition,
+			Child:     child.Child,
+		}
+		return &logical.LogicalSort{
+			SortKey: child.SortKey,
+			// Recursively push the filter further down past the sort
+			Child:   PushdownPredicates(newFilter),
+		}
 
 	default:
 		// Cannot push down further
