@@ -27,7 +27,7 @@ The project is divided into several Go packages:
 - [x] Cardinality Estimation: Selectivity rules for various operators (=, !=, >, etc).
 - [x] Plan Visualization (EXPLAIN): Human-readable tree representation of the physical plan.
 - [x] Advanced Physical Operators: HashJoin and Sort nodes.
-- [ ] Aggregation and Grouping: HashAggregate and StreamAggregate.
+- [x] Aggregation and Grouping: HashAggregate and StreamAggregate.
 - [ ] Equivalence Classes: Transitive closure for smart predicates.
 - [ ] LIMIT and Top-N Optimization: TopNSort and Limit operators.
 

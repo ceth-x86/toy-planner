@@ -37,7 +37,7 @@ func (p *PhysicalPlanner) CreatePhysicalPlan(node logical.LogicalNode) physical.
 		if scan, ok := n.Child.(*logical.LogicalScan); ok {
 			return p.planScanWithFilter(n, scan)
 		}
-		
+
 		// General filter application
 		childPhys := p.CreatePhysicalPlan(n.Child)
 		selectivity := CalculateSelectivity(n.Condition, p.catalog)
@@ -67,6 +67,9 @@ func (p *PhysicalPlanner) CreatePhysicalPlan(node logical.LogicalNode) physical.
 			Child:   childPhys,
 		}
 
+	case *logical.LogicalAggregate:
+		return p.planAggregate(n)
+
 	default:
 		return nil
 	}
@@ -77,7 +80,7 @@ func (p *PhysicalPlanner) planScanWithFilter(f *logical.LogicalFilter, s *logica
 	if !ok {
 		panic(fmt.Sprintf("table %q not found in catalog", s.TableName))
 	}
-	
+
 	selectivity := CalculateSelectivity(f.Condition, p.catalog)
 
 	seqScan := &physical.SeqScan{
@@ -92,7 +95,7 @@ func (p *PhysicalPlanner) planScanWithFilter(f *logical.LogicalFilter, s *logica
 	}
 
 	matches := eqFilterRe.FindAllStringSubmatch(f.Condition, -1)
-	
+
 	if len(matches) > 0 {
 		col := matches[0][2]
 		hasIndex := false
@@ -111,7 +114,7 @@ func (p *PhysicalPlanner) planScanWithFilter(f *logical.LogicalFilter, s *logica
 				TotalRows:   meta.RowCount,
 				Selectivity: selectivity,
 			}
-			
+
 			if indexScan.Cost() < physSeq.Cost() {
 				return indexScan
 			}
@@ -171,14 +174,63 @@ func (p *PhysicalPlanner) planJoin(j *logical.LogicalJoin) physical.PhysicalNode
 	return winner
 }
 
+func (p *PhysicalPlanner) planAggregate(agg *logical.LogicalAggregate) physical.PhysicalNode {
+	childPhys := p.CreatePhysicalPlan(agg.Child)
+
+	// Candidate 1: HashAggregate
+	hashAgg := &physical.HashAggregate{
+		GroupKeys: agg.GroupKeys,
+		AggFuncs:  agg.AggFuncs,
+		Child:     childPhys,
+	}
+
+	// Scalar aggregate (no GROUP BY) — StreamAggregate doesn't need Sort
+	if len(agg.GroupKeys) == 0 {
+		return hashAgg
+	}
+
+	// Candidate 2: StreamAggregate (requires Sort unless already sorted)
+	// TODO: IndexScan on group key also produces sorted output.
+	// We check if child is already a Sort node with the right key.
+	isSorted := false
+	if s, ok := childPhys.(*physical.Sort); ok && s.SortKey == agg.GroupKeys[0] {
+		isSorted = true
+	}
+
+	var streamAgg physical.PhysicalNode
+	if isSorted {
+		streamAgg = &physical.StreamAggregate{
+			GroupKeys: agg.GroupKeys,
+			AggFuncs:  agg.AggFuncs,
+			Child:     childPhys,
+		}
+	} else {
+		// Needs an explicit Sort node
+		sortNode := &physical.Sort{
+			SortKey: agg.GroupKeys[0],
+			Child:   childPhys,
+		}
+		streamAgg = &physical.StreamAggregate{
+			GroupKeys: agg.GroupKeys,
+			AggFuncs:  agg.AggFuncs,
+			Child:     sortNode,
+		}
+	}
+
+	if hashAgg.Cost() <= streamAgg.Cost() {
+		return hashAgg
+	}
+	return streamAgg
+}
+
 func (p *PhysicalPlanner) calculateJoinSelectivity(condition string, leftRows, rightRows float64) float64 {
 	matches := joinCondRe.FindStringSubmatch(condition)
-	
+
 	maxNDV := 0.0
 	if len(matches) > 0 {
 		t1, c1 := matches[1], matches[2]
 		t2, c2 := matches[3], matches[4]
-		
+
 		meta1, ok1 := p.catalog.GetTable(t1)
 		if !ok1 {
 			panic(fmt.Sprintf("table %q (from join condition) not found in catalog", t1))
@@ -187,18 +239,24 @@ func (p *PhysicalPlanner) calculateJoinSelectivity(condition string, leftRows, r
 		if !ok2 {
 			panic(fmt.Sprintf("table %q (from join condition) not found in catalog", t2))
 		}
-		
+
 		ndv1 := float64(meta1.ColumnNDVs[c1])
 		ndv2 := float64(meta2.ColumnNDVs[c2])
-		
-		if ndv1 > maxNDV { maxNDV = ndv1 }
-		if ndv2 > maxNDV { maxNDV = ndv2 }
+
+		if ndv1 > maxNDV {
+			maxNDV = ndv1
+		}
+		if ndv2 > maxNDV {
+			maxNDV = ndv2
+		}
 	}
 
 	if maxNDV == 0 {
 		maxNDV = math.Max(leftRows, rightRows)
-		if maxNDV == 0 { return 1.0 }
+		if maxNDV == 0 {
+			return 1.0
+		}
 	}
-	
+
 	return 1.0 / maxNDV
 }

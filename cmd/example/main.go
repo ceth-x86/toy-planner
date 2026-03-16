@@ -94,4 +94,27 @@ func main() {
 	fmt.Println("\nFinal Optimized Physical Plan (EXPLAIN):")
 	fmt.Println(physPlan2.Explain(0))
 	fmt.Printf("\nTotal Estimated Cost: %.2f\n", physPlan2.Cost())
+
+	// --- EXAMPLE 3: Aggregation (HashAggregate vs Sort + StreamAggregate) ---
+	// SELECT user_id, SUM(total) FROM Orders GROUP BY user_id
+	fmt.Println("\n========================================================")
+	fmt.Println("EXAMPLE 3: Aggregation (GROUP BY user_id)")
+	fmt.Println("========================================================")
+
+	ordersScan3 := &logical.LogicalScan{TableName: "Orders"}
+	agg3 := &logical.LogicalAggregate{
+		GroupKeys: []string{"user_id"},
+		AggFuncs:  map[string]string{"total": "SUM"},
+		Child:     ordersScan3,
+	}
+
+	fmt.Println("\nInitial Logical Plan:")
+	fmt.Println(agg3.String())
+
+	optLogical3 := optimizer.PushdownPredicates(agg3)
+	physPlan3 := planner.CreatePhysicalPlan(optLogical3)
+
+	fmt.Println("\nFinal Optimized Physical Plan (EXPLAIN):")
+	fmt.Println(physPlan3.Explain(0))
+	fmt.Printf("\nTotal Estimated Cost: %.2f\n", physPlan3.Cost())
 }

@@ -1,6 +1,9 @@
 package physical
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // PhysicalNode represents an execution strategy.
 // Implementations may assume non-nil children in Cost() and Rows() methods;
@@ -17,3 +20,13 @@ type PhysicalNode interface {
 }
 
 const detailPrefix = "     "
+
+// FormatAggFuncs returns a deterministic sorted representation of aggregate functions.
+func FormatAggFuncs(aggFuncs map[string]string) string {
+	aggs := make([]string, 0, len(aggFuncs))
+	for col, f := range aggFuncs {
+		aggs = append(aggs, fmt.Sprintf("%s(%s)", f, col))
+	}
+	sort.Strings(aggs)
+	return fmt.Sprintf("%v", aggs)
+}

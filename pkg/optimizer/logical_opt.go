@@ -38,6 +38,13 @@ func PushdownPredicates(node logical.LogicalNode) logical.LogicalNode {
 			Child:   PushdownPredicates(n.Child),
 		}
 
+	case *logical.LogicalAggregate:
+		return &logical.LogicalAggregate{
+			GroupKeys: n.GroupKeys,
+			AggFuncs:  n.AggFuncs,
+			Child:     PushdownPredicates(n.Child),
+		}
+
 	default:
 		return n
 	}

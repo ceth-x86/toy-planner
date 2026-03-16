@@ -230,6 +230,71 @@ func TestPhysicalPlanner_Sort(t *testing.T) {
 	}
 }
 
+func TestPhysicalPlanner_ScalarAggregate(t *testing.T) {
+	cat := catalog.NewCatalog()
+	cat.RegisterTable(catalog.TableMetadata{Name: "Orders", RowCount: 100})
+	planner := NewPhysicalPlanner(cat)
+
+	// SELECT COUNT(*) FROM Orders (empty GroupKeys)
+	agg := &logical.LogicalAggregate{
+		GroupKeys: []string{},
+		AggFuncs:  map[string]string{"*": "COUNT"},
+		Child:     &logical.LogicalScan{TableName: "Orders"},
+	}
+
+	// Should not panic and should return a HashAggregate (scalar)
+	plan := planner.CreatePhysicalPlan(agg)
+	if _, ok := plan.(*physical.HashAggregate); !ok {
+		t.Errorf("Expected HashAggregate for scalar aggregate, got %T", plan)
+	}
+}
+
+func TestPhysicalPlanner_Aggregate(t *testing.T) {
+	cat := catalog.NewCatalog()
+	cat.RegisterTable(catalog.TableMetadata{Name: "Orders", RowCount: 5000})
+	planner := NewPhysicalPlanner(cat)
+
+	agg := &logical.LogicalAggregate{
+		GroupKeys: []string{"user_id"},
+		AggFuncs:  map[string]string{"total": "SUM"},
+		Child:     &logical.LogicalScan{TableName: "Orders"},
+	}
+
+	plan := planner.CreatePhysicalPlan(agg)
+	// HashAgg cost = 5000 + (5000 * 1.5) = 12500
+	// StreamAgg cost = 5000 + (5000 * log2(5000)) + 5000 = 10000 + ~61000 = large
+	// HashAgg should be chosen.
+	if _, ok := plan.(*physical.HashAggregate); !ok {
+		t.Errorf("Expected HashAggregate, got %T", plan)
+	}
+}
+
+func TestPhysicalPlanner_StreamAggregate_AlreadySorted(t *testing.T) {
+	cat := catalog.NewCatalog()
+	cat.RegisterTable(catalog.TableMetadata{Name: "Orders", RowCount: 100})
+	planner := NewPhysicalPlanner(cat)
+
+	// Sort(user_id) -> Aggregate(by user_id)
+	agg := &logical.LogicalAggregate{
+		GroupKeys: []string{"user_id"},
+		AggFuncs:  map[string]string{"total": "SUM"},
+		Child: &logical.LogicalSort{
+			SortKey: "user_id",
+			Child:   &logical.LogicalScan{TableName: "Orders"},
+		},
+	}
+
+	plan := planner.CreatePhysicalPlan(agg)
+	
+	// Since child is Sort(user_id), planner should recognize it and choose StreamAggregate.
+	// Cost(HashAgg) = (Cost(Sort)+100) + 100 * 1.5
+	// Cost(StreamAgg) = (Cost(Sort)+100) + 100
+	// StreamAgg should win.
+	if _, ok := plan.(*physical.StreamAggregate); !ok {
+		t.Errorf("Expected StreamAggregate for pre-sorted input, got %T", plan)
+	}
+}
+
 func TestPhysicalPlanner_FilterAboveJoin(t *testing.T) {
 	cat := catalog.NewCatalog()
 	cat.RegisterTable(catalog.TableMetadata{
